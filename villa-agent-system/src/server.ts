@@ -20,6 +20,13 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ ok: false, error: parsed.error.flatten() });
   }
 
+  // Dev-mode: run synchronously without Postgres/Redis.
+  if ((process.env.DEV_SYNC ?? "1") === "1") {
+    const { runSyncChat } = await import("./dev/syncChat.js");
+    const result = await Effect.runPromise(runSyncChat(parsed.data));
+    return res.json(result);
+  }
+
   const program = WorkflowEngine.ingestInbound(parsed.data);
   const BaseLayer = Layer.mergeAll(PgLive, RedisLive);
   const AppLayer = BaseLayer.pipe(Layer.provideMerge(RedisStreamsBusLive), Layer.provideMerge(PgStoreLive));
@@ -35,10 +42,11 @@ app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`API listening on http://localhost:${PORT}`);
 
-  // Start worker in-process for single-server MVP.
-  const BaseLayer = Layer.mergeAll(PgLive, RedisLive);
-  const AppLayer = BaseLayer.pipe(Layer.provideMerge(RedisStreamsBusLive), Layer.provideMerge(PgStoreLive));
-  const workerRuntime = Worker.runForever().pipe(Effect.provide(AppLayer));
-
-  Effect.runFork(workerRuntime as any);
+  // Start worker only in async mode.
+  if ((process.env.DEV_SYNC ?? "1") !== "1") {
+    const BaseLayer = Layer.mergeAll(PgLive, RedisLive);
+    const AppLayer = BaseLayer.pipe(Layer.provideMerge(RedisStreamsBusLive), Layer.provideMerge(PgStoreLive));
+    const workerRuntime = Worker.runForever().pipe(Effect.provide(AppLayer));
+    Effect.runFork(workerRuntime as any);
+  }
 });
