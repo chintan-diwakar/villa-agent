@@ -37,7 +37,9 @@ export const TriageAgent: Agent = {
           `channel: ${String(event.payload["channel"] ?? "unknown")}`,
           context?.bundle?.transcript ? `recent:\n${context.bundle.transcript}` : "recent: (none)",
           "user_message_parts:",
-          JSON.stringify(event.payload["inboundParts"] ?? [], null, 2)
+          JSON.stringify(event.payload["inboundParts"] ?? [], null, 2),
+          "tool_results:",
+          JSON.stringify(event.payload["toolResults"] ?? [], null, 2)
         ].join("\n")
       }),
       () =>

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down -v" ,
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js"

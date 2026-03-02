@@ -9,9 +9,8 @@ export type SyncChatResponse = {
 
 /**
  * Synchronous dev-only runner.
- * No Redis Streams, no background worker.
  *
- * Flow: triage -> booking -> formatter
+ * Flow: triage -> planner -> (tool executor) -> booking(writer) -> formatter
  */
 export function runSyncChat(inbound: InboundMessage): Effect.Effect<SyncChatResponse, Error> {
   return Effect.gen(function* () {
@@ -33,16 +32,37 @@ export function runSyncChat(inbound: InboundMessage): Effect.Effect<SyncChatResp
       facts: {}
     };
 
-    const triage = yield* TriageAgent.handle({ event: baseEvent as any, state: baseState as any, context: { bundle: null } });
-    const intent = (triage.statePatch as any)?.intent ?? "BOOKING";
+    // Triage
+    const triage = yield* TriageAgent.handle({ event: baseEvent as any, state: baseState as any, context: { bundle: { transcript: "" } } });
+    const intent = (triage.statePatch as any)?.intent ?? "GENERAL";
 
+    // Planner (tool selection)
+    const { runPlanner } = yield* Effect.promise(() => import("../workflow/planner.js"));
+    const plan = yield* runPlanner({
+      model: process.env.MODEL_PLANNER ?? process.env.MODEL_TRIAGE ?? "gpt-4.1-mini",
+      transcript: "",
+      inboundParts: inbound.parts
+    });
+
+    // Execute tools safely
+    const { executeTool } = yield* Effect.promise(() => import("../tools/executor.js"));
+    const toolResults = [] as any[];
+    for (const tr of plan.toolRequests) {
+      toolResults.push(yield* executeTool(tr));
+    }
+
+    // Booking/Writer: pass tool results via event payload
     const bookingEvent = {
       ...baseEvent,
       type: "NEXT_EVENT" as const,
-      payload: { intent }
+      payload: { intent, inboundParts: inbound.parts, toolResults }
     };
 
-    const booking = yield* BookingAgent.handle({ event: bookingEvent as any, state: { ...baseState, ...(triage.statePatch ?? {}) } as any, context: { bundle: null } });
+    const booking = yield* BookingAgent.handle({
+      event: bookingEvent as any,
+      state: { ...baseState, ...(triage.statePatch ?? {}) } as any,
+      context: { bundle: { transcript: "", userContext: {} } }
+    });
 
     const finalPayload = booking.emitEvents?.find((e) => e.type === "FINAL_RESULT")?.payload ?? {
       status: "COMPLETED",
